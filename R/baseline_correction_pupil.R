@@ -1,63 +1,58 @@
-#' Turns pupil sizes with blinks NA and linearly interpolates values
-#' @param datafile data frame.
-#' @param extendblinks blinks already extended  in data frame
-#' @param type type of interpolation (linear or cubic)
-#' @param maxgap max number of NAs to interpolate.
-#' @param hz recording frequency of ET
+#' Performs linear (sub) or divisive baseline correction relative to desired stim_onset and off_set
+#' @param datafile raw pupil data
+#' @param pupil_colname name of your pupil colname you want baseline corrected
+#' @param baseline_window user-specified threshold for baseline window.
+#' @param baseline correction method. Default is sub but can also include divisive
+#' @return data frame containing baseline corrected data from event of interest
 #' @export
-#' @import zoo
-#'
-#' @return data frame containing interpolated data
-#'
-interpolate_pupil<-function(datafile, pupil, subject, trial, extendblinks=FALSE, maxgap=Inf, type=c("linear", "cubic"), hz=NA) {
-  #supports linear and cublic-spline interpolation
-  if (maxgap!=Inf){
-    maxgap <- round(maxgap/(1000/hz))
-  }
+baseline_correction_pupil<-function(datafile, pupil_colname="pupil", baseline_window=NA, baseline_method="sub")
+{
 
-  if (extendblinks==FALSE & type=="linear") {
-    message("Turning pupil size with blinks to NA")
-    blinks_na <- datafile %>% dplyr::mutate(pup = ifelse(blink==1, NA, pupil)) #turns blinks into NA for interpolation
-    message("Performing linear interpolation")
-    pupil_interp <- blinks_na %>%
+  if (baseline_method=="sub") {
+    message("Calculating median baseline from",":", baseline_window[1], "-", baseline_window[2])
+    message("Merging baseline")
+    baseline <- datafile  %>%
+      dplyr::filter(time > baseline_window[1],
+                    time < baseline_window[2]) %>%
       dplyr::group_by(subject, trial) %>%
-      dplyr::mutate(interp = zoo::na.approx(pup, rule=2)) %>%
-      dplyr::ungroup()
-    return(pupil_interp)
+      dplyr::rename(pupil_avg = pupil_colname) %>%
+      dplyr::summarise(baseline = median(pupil_avg, na.rm=TRUE)) %>%
+      dplyr::full_join(., datafile) %>% # merge median pupil size with raw dataset
+      ungroup()
+
+
+    message("Performing subtractive baseline correction")
+
+    corrected_baseline <- baseline %>%
+      dplyr::rename(pupil_avg = pupil_colname) %>%
+      dplyr::mutate(baselinecorrectedp = pupil_avg - baseline) %>%
+      dplyr::rename(pup_interp = pupil_avg) %>%
+      dplyr::arrange(subject, trial, time)
   }
 
-  if (extendblinks==TRUE & type=="linear") {
-    message("Performing linear interpolation")
-    pupil_interp <- datafile %>%
-      dplyr::group_by(subject, trial) %>%
-      dplyr::mutate(interp = zoo::na.approx(extendpupil, na.rm = FALSE, rule=2)) %>%
-      dplyr::ungroup()
-    return(pupil_interp)
+  if (baseline_method=="div") {
+    message("Calculating median baseline from",":", baseline_window[1], "-", baseline_window[2])
+    message("Merging baseline")
+    baseline <- datafile  %>%
+      dplyr::filter(time > baseline_window[1],
+                    time < baseline_window[2]) %>%
+      dplyr::group_by(subject) %>%
+      dplyr::rename(pupil_avg = pupil_colname) %>%
+      dplyr::summarise(baseline = median(pupil_avg, na.rm=TRUE)) %>%
+      dplyr::full_join(., datafile) %>% # merge median pupil size with raw dataset
+      ungroup()
+    #use grand average baseline instead of individual trial baseline to minimize bias
+
+    message("Performing divisive baseline correction")
+
+    corrected_baseline <- baseline %>%
+      dplyr::rename(pupil_avg = pupil_colname) %>%
+      dplyr::mutate(baselinecorrectedp = (pupil_avg - baseline)/baseline) %>%
+      dplyr::rename(pup_interp = pupil_avg) %>%
+      dplyr::arrange(subject, trial, time)
 
   }
 
-  if (extendblinks==FALSE & type=="cubic") {
-    message("Turning pupil size with blinks to NA")
-    blinks_na <- datafile %>% dplyr::mutate(pup = ifelse(blink==1, NA, pupil)) #turns blinks into NA for interpolation
-    message("Performing cubic interpolation")
-    pupil_interp <- blinks_na %>% dplyr::group_by(subject, trial) %>%
-      dplyr::mutate(index = ifelse(is.na(pup), NA, dplyr::row_number()),index=zoo::na.approx(index, na.rm=FALSE, rule=2),
-                    interp = zoo::na.spline(pup, na.rm=FALSE, x=index, maxgap=maxgap)) %>%
-      dplyr::ungroup()
-
-    return(pupil_interp)
-  }
-
-  if (extendblinks==TRUE & type=="cubic") {
-    message("Performing cubic interpolation")
-    pupil_interp <- datafile %>% dplyr::group_by(subject, trial) %>%
-      dplyr::mutate(
-        index = ifelse(is.na(extendpupil), NA, dplyr::row_number()),
-        index= zoo::na.approx(index, na.rm=FALSE),
-        interp = zoo::na.spline(extendpupil, na.rm=FALSE, x=index, maxgap=maxgap)) %>%
-      dplyr::ungroup()
-
-    return(pupil_interp)
-  }
+  return(corrected_baseline)
 
 }

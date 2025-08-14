@@ -1,1 +1,5 @@
-exportPattern("^[[:alpha:]]+")
+export(baseline_correction_pupil)
+export(count_missing_pupil)
+export(extend_blinks)
+export(interpolate_pupil)
+export(moving_average_pupil)
